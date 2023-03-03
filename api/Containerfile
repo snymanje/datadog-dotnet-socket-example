@@ -1,0 +1,73 @@
+######################## Builder Args ########################
+ARG BASE_REGISTRY=registry.access.redhat.com
+ARG BASE_IMAGE=ubi8/ubi
+ARG BASE_TAG=8.7
+
+######################## Final Args ########################
+
+ARG FINAL_IMAGE=ubi8-minimal
+ARG FINAL_TAG=8.7
+
+######################## Builder Start ########################
+
+FROM ${BASE_REGISTRY}/${BASE_IMAGE}:${BASE_TAG} as builder
+
+# create dotnet user, grant permissions to /app dir and install dotnet sdk 
+RUN dnf install -y dotnet-sdk-3.1 \
+    && dnf update -y \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Copy and publish the application
+WORKDIR /app
+COPY . .
+RUN dotnet restore --configfile nuget.config
+RUN dotnet publish --runtime linux-x64 --self-contained true -c Release -o out
+
+######################## Final Start ########################
+
+FROM ${BASE_REGISTRY}/${FINAL_IMAGE}:${FINAL_TAG} as final
+
+# This is a minimal image with zero packages installed. We need to first isntall shadow-utils to use the useradd command
+# The minimal packaage manager, microndf can be used to installed the package 
+# Also create the dotnet user and grant permissions to the /app directory 
+RUN microdnf install shadow-utils \
+    && microdnf install -y libicu \
+    && microdnf clean all \
+    && useradd dotnet -m -d /home/dotnet -s /sbin/nologin \
+    && mkdir -p /app \
+    && chown -R dotnet /app 
+
+WORKDIR /app
+
+COPY --from=builder /app/out .
+
+# Set environment variables
+ENV DOTNET_SYSTEM_NET_HTTP_USESOCKETSHTTPHANDLER=0
+ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED true
+ENV ASPNETCORE_URLS=http://+:5000
+
+# Enable Datadog automatic instrumentation
+# App is being copied to /app, so Datadog assets are at /app/datadog
+ENV CORECLR_ENABLE_PROFILING=1
+ENV CORECLR_PROFILER={846F5F1C-F9AE-4B07-969E-05C26BC060D8}
+ENV CORECLR_PROFILER_PATH=/app/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so
+ENV DD_DOTNET_TRACER_HOME=/app/datadog
+ENV DD_TRACE_STARTUP_LOGS=true
+ENV DD_TRACE_DEBUG=true
+
+# Run the createLogPath script on Linux to ensure the automatic instrumentation logs are generated without permission issues
+# Remove the shadow-utils, it's not required anymore.
+RUN chmod +x /app/UBIDotNetImage.dll \
+    && microdnf remove shadow-utils \
+    && microdnf clean all \
+    && /app/datadog/createLogPath.sh
+
+USER dotnet
+
+EXPOSE 80
+EXPOSE 443
+EXPOSE 5000
+
+# Start the application
+ENTRYPOINT ["./UBIDotNetImage"]
