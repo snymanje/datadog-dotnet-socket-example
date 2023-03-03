@@ -43,7 +43,6 @@ WORKDIR /app
 COPY --from=builder /app/out .
 
 # Set environment variables
-ENV DOTNET_SYSTEM_NET_HTTP_USESOCKETSHTTPHANDLER=0
 ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED true
 ENV ASPNETCORE_URLS=http://+:5000
 
@@ -55,6 +54,10 @@ ENV CORECLR_PROFILER_PATH=/app/datadog/linux-x64/Datadog.Trace.ClrProfiler.Nativ
 ENV DD_DOTNET_TRACER_HOME=/app/datadog
 ENV DD_TRACE_STARTUP_LOGS=true
 ENV DD_TRACE_DEBUG=true
+ENV DD_PROFILING_ENABLED=1
+ENV LD_PRELOAD=/app/datadog/linux-x64/Datadog.Linux.ApiWrapper.x64.so
+ENV DD_DOTNET_TRACER_HOME=/app/datadog
+ENV DD_TAGS=layer:api,team:da
 
 # Run the createLogPath script on Linux to ensure the automatic instrumentation logs are generated without permission issues
 # Remove the shadow-utils, it's not required anymore.
